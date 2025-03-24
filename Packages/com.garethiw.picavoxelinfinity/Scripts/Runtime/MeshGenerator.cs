@@ -70,7 +70,7 @@ namespace PicaVoxel
             public bool Equals(VoxelFace face) { return face.Active==Active && face.Color == Color && face.VertShade == VertShade; }
         }
         
-        public static void GenerateGreedy(List<Vector3> vertices, List<Vector4> uvs, List<Color32> colors, List<int> indexes, ref Voxel[] invoxels, Chunk chunk,Chunk[] nbs, float voxelSize,float overlapAmount, int xOffset, int yOffset, int zOffset, int xSize, int ySize, int zSize, int ub0, int ub1, int ub2, float selfShadeIntensity)
+        public static void GenerateGreedy(List<Vector3> vertices, List<Vector4> uvs, List<Color32> colors, List<int> indexes, ref Voxel[] invoxels, Chunk chunk,Chunk[] nbs, float voxelSize,int lod, float overlapAmount, int xOffset, int yOffset, int zOffset, int xSize, int ySize, int zSize, int ub0, int ub1, int ub2, float selfShadeIntensity)
         {
             vertices.Clear();
             uvs.Clear();
@@ -132,7 +132,7 @@ namespace PicaVoxel
                                 {
                                     voxelFace = new VoxelFace();
 
-                                    GetVoxelFace(voxelFace, x[0], x[1], x[2], side, ref invoxels, chunk, nbs, voxelSize, xOffset,
+                                    GetVoxelFace(voxelFace, x[0], x[1], x[2], side, ref invoxels, chunk, nbs, voxelSize, lod,xOffset,
                                         yOffset, zOffset, xSize, ySize, zSize, ub0, ub1, ub2, selfShadeIntensity);
                                 }
                                 else voxelFace = null;
@@ -142,7 +142,7 @@ namespace PicaVoxel
                                     voxelFace1 = new VoxelFace();
                                     
                                     GetVoxelFace(voxelFace1, x[0] + q[0], x[1] + q[1], x[2] + q[2], side, ref invoxels, chunk, nbs,
-                                        voxelSize, xOffset, yOffset, zOffset, xSize, ySize, zSize, ub0, ub1, ub2,
+                                        voxelSize, lod,xOffset, yOffset, zOffset, xSize, ySize, zSize, ub0, ub1, ub2,
                                         selfShadeIntensity);
                                 }
                                 else voxelFace1 = null;
@@ -228,7 +228,7 @@ namespace PicaVoxel
                                                 new Vector3(x[0] + du[0], x[1] + du[1], x[2] + du[2]),
                                                 new Vector3(x[0], x[1], x[2]), 
                                                 side,
-                                                voxelSize,
+                                                voxelSize,lod,
                                                 overlapAmount,
                                                 mask[n],
                                                 !backFace,
@@ -241,7 +241,7 @@ namespace PicaVoxel
                                                 new Vector3(x[0] + dv[0], x[1] + dv[1], x[2] + dv[2]),
                                                 new Vector3(x[0], x[1], x[2]), 
                                                 side,
-                                                voxelSize,
+                                                voxelSize,lod,
                                                 overlapAmount,
                                                 mask[n],
                                                 backFace,
@@ -277,8 +277,11 @@ namespace PicaVoxel
           
         }
         
-        public static void GenerateCulled(List<Vector3> vertices, List<Vector4> uvs, List<Color32> colors, List<int> indexes, ref Voxel[] invoxels,Chunk chunk, Chunk[] nbs, float voxelSize,float overlapAmount, int xOffset, int yOffset, int zOffset, int xSize, int ySize, int zSize, int ub0, int ub1, int ub2, float selfShadeIntensity)
+        public static void GenerateCulled(List<Vector3> vertices, List<Vector4> uvs, List<Color32> colors, List<int> indexes, ref Voxel[] invoxels,Chunk chunk, Chunk[] nbs, float voxelSize,int lod,float overlapAmount, int xOffset, int yOffset, int zOffset, int xSize, int ySize, int zSize, int ub0, int ub1, int ub2, float selfShadeIntensity)
         {
+            lod += 1;
+            if (lod == 3) lod = 4;
+            
             vertices.Clear();
             uvs.Clear();
             colors.Clear();
@@ -286,9 +289,9 @@ namespace PicaVoxel
 
             VoxelFace vf = new VoxelFace();
 
-            for (int z = 0; z < zSize; z++)
-                for (int y = 0; y < ySize; y++)
-                    for (int x = 0; x < xSize; x++)
+            for (int z = 0; z < zSize; z+=lod)
+                for (int y = 0; y < ySize; y+=lod)
+                    for (int x = 0; x < xSize; x+=lod)
                     {
                         if (invoxels[xOffset + x + (ub0 + 1) * (yOffset + y + (ub1 + 1) * (zOffset + z))].Active == false) continue;
 
@@ -296,18 +299,18 @@ namespace PicaVoxel
 
                         for (int f = 0; f < 6; f++)
                         {
-                            GetVoxelFace(vf, x, y, z, f, ref invoxels, chunk, nbs, voxelSize, xOffset, yOffset, zOffset, xSize, ySize, zSize, ub0, ub1, ub2, selfShadeIntensity);
+                            GetVoxelFace(vf, x, y, z, f, ref invoxels, chunk, nbs, voxelSize, lod,xOffset, yOffset, zOffset, xSize, ySize, zSize, ub0, ub1, ub2, selfShadeIntensity);
 
                             if (vf.Active)
                             {
                                 switch (f)
                                 {
-                                    case 0: Quad(worldOffset + new Vector3(0, 1, 0), worldOffset + new Vector3(1, 1, 0), worldOffset + new Vector3(1, 0, 0), worldOffset + new Vector3(0, 0, 0), f, voxelSize, overlapAmount, vf, false, selfShadeIntensity, vertices, indexes, colors, uvs); break;
-                                    case 1: Quad(worldOffset + new Vector3(0, 1, 1), worldOffset + new Vector3(1, 1, 1), worldOffset + new Vector3(1, 0, 1), worldOffset + new Vector3(0, 0, 1), f, voxelSize, overlapAmount, vf, true, selfShadeIntensity, vertices, indexes, colors, uvs); break;
-                                    case 2: Quad(worldOffset + new Vector3(1, 1, 0), worldOffset + new Vector3(1, 1, 1), worldOffset + new Vector3(1, 0, 1), worldOffset + new Vector3(1, 0, 0), f, voxelSize, overlapAmount, vf, false, selfShadeIntensity, vertices, indexes, colors, uvs); break;
-                                    case 3: Quad(worldOffset + new Vector3(0, 1, 0), worldOffset + new Vector3(0, 1, 1), worldOffset + new Vector3(0, 0, 1), worldOffset + new Vector3(0, 0, 0), f, voxelSize, overlapAmount, vf, true, selfShadeIntensity, vertices, indexes, colors, uvs); break;
-                                    case 4: Quad(worldOffset + new Vector3(0, 1, 1), worldOffset + new Vector3(1, 1, 1), worldOffset + new Vector3(1, 1, 0), worldOffset + new Vector3(0, 1, 0), f, voxelSize, overlapAmount, vf, false, selfShadeIntensity, vertices, indexes, colors, uvs); break;
-                                    case 5: Quad(worldOffset + new Vector3(0, 0, 1), worldOffset + new Vector3(1, 0, 1), worldOffset + new Vector3(1, 0, 0), worldOffset + new Vector3(0, 0, 0), f, voxelSize, overlapAmount, vf, true, selfShadeIntensity, vertices, indexes, colors, uvs); break;
+                                    case 0: Quad(worldOffset + new Vector3(0, lod, 0), worldOffset + new Vector3(lod, lod, 0), worldOffset + new Vector3(lod, 0, 0), worldOffset + new Vector3(0, 0, 0), f, voxelSize, lod, overlapAmount, vf, false, selfShadeIntensity, vertices, indexes, colors, uvs); break;
+                                    case 1: Quad(worldOffset + new Vector3(0, lod, lod), worldOffset + new Vector3(lod, lod, lod), worldOffset + new Vector3(lod, 0, lod), worldOffset + new Vector3(0, 0, lod), f, voxelSize, lod, overlapAmount, vf, true, selfShadeIntensity, vertices, indexes, colors, uvs); break;
+                                    case 2: Quad(worldOffset + new Vector3(lod, lod, 0), worldOffset + new Vector3(lod, lod, lod), worldOffset + new Vector3(lod, 0, lod), worldOffset + new Vector3(lod, 0, 0), f, voxelSize, lod, overlapAmount, vf, false, selfShadeIntensity, vertices, indexes, colors, uvs); break;
+                                    case 3: Quad(worldOffset + new Vector3(0, lod, 0), worldOffset + new Vector3(0, lod, lod), worldOffset + new Vector3(0, 0, lod), worldOffset + new Vector3(0, 0, 0), f, voxelSize, lod, overlapAmount, vf, true, selfShadeIntensity, vertices, indexes, colors, uvs); break;
+                                    case 4: Quad(worldOffset + new Vector3(0, lod, lod), worldOffset + new Vector3(lod, lod, lod), worldOffset + new Vector3(lod, lod, 0), worldOffset + new Vector3(0, lod, 0), f, voxelSize, lod, overlapAmount, vf, false, selfShadeIntensity, vertices, indexes, colors, uvs); break;
+                                    case 5: Quad(worldOffset + new Vector3(0, 0, lod), worldOffset + new Vector3(lod, 0, lod), worldOffset + new Vector3(lod, 0, 0), worldOffset + new Vector3(0, 0, 0), f, voxelSize, lod, overlapAmount, vf, true, selfShadeIntensity, vertices, indexes, colors, uvs); break;
                                 }
                             }
                         }
@@ -317,7 +320,7 @@ namespace PicaVoxel
           
         }
 
-        static void GetVoxelFace(VoxelFace voxelFace, int x, int y, int z, int side, ref Voxel[] invoxels, Chunk chunk, Chunk[] nbs, float voxelSize, int xOffset, int yOffset, int zOffset, int xSize, int ySize, int zSize, int ub0, int ub1, int ub2, float selfShadeIntensity)
+        static void GetVoxelFace(VoxelFace voxelFace, int x, int y, int z, int side, ref Voxel[] invoxels, Chunk chunk, Chunk[] nbs, float voxelSize, int lod, int xOffset, int yOffset, int zOffset, int xSize, int ySize, int zSize, int ub0, int ub1, int ub2, float selfShadeIntensity)
         {
             Voxel v = invoxels[(x + xOffset) + (ub0 + 1)*((y + yOffset) + (ub1 + 1)*(z + zOffset))];
 
@@ -335,60 +338,60 @@ namespace PicaVoxel
                 {
                     case 0:
                     case 1:
-                        if (IsVoxelAt(x + xOffset -1, y + yOffset, z + zOffset + (side==0?-1:1), ref invoxels, chunk, nbs, ub0, ub1, ub2) ||
-                            IsVoxelAt(x + xOffset - 1, y + yOffset - 1, z + zOffset + (side == 0 ? -1 : 1), ref invoxels, chunk, nbs, ub0, ub1, ub2) ||
-                            IsVoxelAt(x + xOffset, y + yOffset - 1, z + zOffset + (side == 0 ? -1 : 1), ref invoxels, chunk, nbs, ub0, ub1, ub2)) voxelFace.VertShade |= Corners.TopLeft;
-                        if (IsVoxelAt(x + xOffset + 1, y + yOffset, z + zOffset + (side == 0 ? -1 : 1), ref invoxels, chunk, nbs, ub0, ub1, ub2) ||
-                            IsVoxelAt(x + xOffset + 1, y + yOffset - 1, z + zOffset + (side == 0 ? -1 : 1), ref invoxels, chunk, nbs, ub0, ub1, ub2) ||
-                            IsVoxelAt(x + xOffset, y + yOffset - 1, z + zOffset + (side == 0 ? -1 : 1), ref invoxels, chunk, nbs, ub0, ub1, ub2)) voxelFace.VertShade |= Corners.BottomLeft;
-                        if (IsVoxelAt(x + xOffset - 1, y + yOffset, z + zOffset + (side == 0 ? -1 : 1), ref invoxels, chunk, nbs, ub0, ub1, ub2) ||
-                            IsVoxelAt(x + xOffset - 1, y + yOffset + 1, z + zOffset + (side == 0 ? -1 : 1), ref invoxels, chunk, nbs, ub0, ub1, ub2) ||
-                            IsVoxelAt(x + xOffset, y + yOffset + 1, z + zOffset + (side == 0 ? -1 : 1), ref invoxels, chunk, nbs, ub0, ub1, ub2)) voxelFace.VertShade |= Corners.TopRight;
-                        if (IsVoxelAt(x + xOffset + 1, y + yOffset, z + zOffset + (side == 0 ? -1 : 1), ref invoxels, chunk, nbs, ub0, ub1, ub2) ||
-                            IsVoxelAt(x + xOffset + 1, y + yOffset + 1, z + zOffset + (side == 0 ? -1 : 1), ref invoxels, chunk, nbs, ub0, ub1, ub2) ||
-                            IsVoxelAt(x + xOffset, y + yOffset + 1, z + zOffset + (side == 0 ? -1 : 1), ref invoxels, chunk, nbs, ub0, ub1, ub2)) voxelFace.VertShade |= Corners.BottomRight;
+                        if (IsVoxelAt(x + xOffset -1, y + yOffset, z + zOffset + (side==0?-lod:lod), ref invoxels, chunk, nbs, ub0, ub1, ub2) ||
+                            IsVoxelAt(x + xOffset - lod, y + yOffset - lod, z + zOffset + (side == 0 ? -lod : lod), ref invoxels, chunk, nbs, ub0, ub1, ub2) ||
+                            IsVoxelAt(x + xOffset, y + yOffset - lod, z + zOffset + (side == 0 ? -lod : lod), ref invoxels, chunk, nbs, ub0, ub1, ub2)) voxelFace.VertShade |= Corners.TopLeft;
+                        if (IsVoxelAt(x + xOffset + lod, y + yOffset, z + zOffset + (side == 0 ? -lod : lod), ref invoxels, chunk, nbs, ub0, ub1, ub2) ||
+                            IsVoxelAt(x + xOffset + lod, y + yOffset - lod, z + zOffset + (side == 0 ? -lod : lod), ref invoxels, chunk, nbs, ub0, ub1, ub2) ||
+                            IsVoxelAt(x + xOffset, y + yOffset - lod, z + zOffset + (side == 0 ? -lod : lod), ref invoxels, chunk, nbs, ub0, ub1, ub2)) voxelFace.VertShade |= Corners.BottomLeft;
+                        if (IsVoxelAt(x + xOffset - lod, y + yOffset, z + zOffset + (side == 0 ? -lod : lod), ref invoxels, chunk, nbs, ub0, ub1, ub2) ||
+                            IsVoxelAt(x + xOffset - lod, y + yOffset + lod, z + zOffset + (side == 0 ? -lod : lod), ref invoxels, chunk, nbs, ub0, ub1, ub2) ||
+                            IsVoxelAt(x + xOffset, y + yOffset + lod, z + zOffset + (side == 0 ? -lod : lod), ref invoxels, chunk, nbs, ub0, ub1, ub2)) voxelFace.VertShade |= Corners.TopRight;
+                        if (IsVoxelAt(x + xOffset + lod, y + yOffset, z + zOffset + (side == 0 ? -lod : lod), ref invoxels, chunk, nbs, ub0, ub1, ub2) ||
+                            IsVoxelAt(x + xOffset + lod, y + yOffset + lod, z + zOffset + (side == 0 ? -lod : lod), ref invoxels, chunk, nbs, ub0, ub1, ub2) ||
+                            IsVoxelAt(x + xOffset, y + yOffset + lod, z + zOffset + (side == 0 ? -lod : lod), ref invoxels, chunk, nbs, ub0, ub1, ub2)) voxelFace.VertShade |= Corners.BottomRight;
                         break;
                     case 2:
                     case 3:
-                        if (IsVoxelAt(x + xOffset + (side == 3 ? -1 : 1), y + yOffset, z + zOffset-1, ref invoxels, chunk, nbs, ub0, ub1, ub2) ||
-                            IsVoxelAt(x + xOffset + (side == 3 ? -1 : 1), y + yOffset - 1, z + zOffset-1, ref invoxels, chunk, nbs, ub0, ub1, ub2) ||
-                            IsVoxelAt(x + xOffset + (side == 3 ? -1 : 1), y + yOffset - 1, z + zOffset, ref invoxels, chunk, nbs, ub0, ub1, ub2)) voxelFace.VertShade |= Corners.TopLeft;
-                        if (IsVoxelAt(x + xOffset + (side == 3 ? -1 : 1), y + yOffset, z + zOffset + 1, ref invoxels, chunk, nbs, ub0, ub1, ub2) ||
-                            IsVoxelAt(x + xOffset + (side == 3 ? -1 : 1), y + yOffset - 1, z + zOffset + 1, ref invoxels, chunk, nbs, ub0, ub1, ub2) ||
-                            IsVoxelAt(x + xOffset + (side == 3 ? -1 : 1), y + yOffset - 1, z + zOffset, ref invoxels, chunk, nbs, ub0, ub1, ub2)) voxelFace.VertShade |= Corners.BottomLeft;
-                        if (IsVoxelAt(x + xOffset + (side == 3 ? -1 : 1), y + yOffset, z + zOffset - 1, ref invoxels, chunk, nbs, ub0, ub1, ub2) ||
-                            IsVoxelAt(x + xOffset + (side == 3 ? -1 : 1), y + yOffset + 1, z + zOffset - 1, ref invoxels, chunk, nbs, ub0, ub1, ub2) ||
-                            IsVoxelAt(x + xOffset + (side == 3 ? -1 : 1), y + yOffset + 1, z + zOffset, ref invoxels, chunk, nbs, ub0, ub1, ub2)) voxelFace.VertShade |= Corners.TopRight;
-                        if (IsVoxelAt(x + xOffset + (side == 3 ? -1 : 1), y + yOffset, z + zOffset + 1, ref invoxels, chunk, nbs, ub0, ub1, ub2) ||
-                            IsVoxelAt(x + xOffset + (side == 3 ? -1 : 1), y + yOffset + 1, z + zOffset + 1, ref invoxels, chunk, nbs, ub0, ub1, ub2) ||
-                            IsVoxelAt(x + xOffset + (side == 3 ? -1 : 1), y + yOffset + 1, z + zOffset, ref invoxels, chunk, nbs, ub0, ub1, ub2)) voxelFace.VertShade |= Corners.BottomRight;
+                        if (IsVoxelAt(x + xOffset + (side == 3 ? -lod : lod), y + yOffset, z + zOffset-lod, ref invoxels, chunk, nbs, ub0, ub1, ub2) ||
+                            IsVoxelAt(x + xOffset + (side == 3 ? -lod : lod), y + yOffset - lod, z + zOffset-lod, ref invoxels, chunk, nbs, ub0, ub1, ub2) ||
+                            IsVoxelAt(x + xOffset + (side == 3 ? -lod : lod), y + yOffset - lod, z + zOffset, ref invoxels, chunk, nbs, ub0, ub1, ub2)) voxelFace.VertShade |= Corners.TopLeft;
+                        if (IsVoxelAt(x + xOffset + (side == 3 ? -lod : lod), y + yOffset, z + zOffset + lod, ref invoxels, chunk, nbs, ub0, ub1, ub2) ||
+                            IsVoxelAt(x + xOffset + (side == 3 ? -lod : lod), y + yOffset - lod, z + zOffset + lod, ref invoxels, chunk, nbs, ub0, ub1, ub2) ||
+                            IsVoxelAt(x + xOffset + (side == 3 ? -lod : lod), y + yOffset - lod, z + zOffset, ref invoxels, chunk, nbs, ub0, ub1, ub2)) voxelFace.VertShade |= Corners.BottomLeft;
+                        if (IsVoxelAt(x + xOffset + (side == 3 ? -lod : lod), y + yOffset, z + zOffset - lod, ref invoxels, chunk, nbs, ub0, ub1, ub2) ||
+                            IsVoxelAt(x + xOffset + (side == 3 ? -lod : lod), y + yOffset + lod, z + zOffset - lod, ref invoxels, chunk, nbs, ub0, ub1, ub2) ||
+                            IsVoxelAt(x + xOffset + (side == 3 ? -lod : lod), y + yOffset + lod, z + zOffset, ref invoxels, chunk, nbs, ub0, ub1, ub2)) voxelFace.VertShade |= Corners.TopRight;
+                        if (IsVoxelAt(x + xOffset + (side == 3 ? -lod : lod), y + yOffset, z + zOffset + lod, ref invoxels, chunk, nbs, ub0, ub1, ub2) ||
+                            IsVoxelAt(x + xOffset + (side == 3 ? -lod : lod), y + yOffset + lod, z + zOffset + lod, ref invoxels, chunk, nbs, ub0, ub1, ub2) ||
+                            IsVoxelAt(x + xOffset + (side == 3 ? -lod : lod), y + yOffset + lod, z + zOffset, ref invoxels, chunk, nbs, ub0, ub1, ub2)) voxelFace.VertShade |= Corners.BottomRight;
                         break;
                     case 4:
                     case 5:
-                        if (IsVoxelAt(x + xOffset, y + yOffset + (side == 5 ? -1 : 1), z + zOffset - 1, ref invoxels, chunk, nbs, ub0, ub1, ub2) ||
-                            IsVoxelAt(x + xOffset-1, y + yOffset + (side == 5 ? -1 : 1), z + zOffset - 1, ref invoxels, chunk, nbs, ub0, ub1, ub2) ||
-                            IsVoxelAt(x + xOffset-1, y + yOffset + (side == 5 ? -1 : 1), z + zOffset, ref invoxels, chunk, nbs, ub0, ub1, ub2)) voxelFace.VertShade |= Corners.TopLeft;
-                        if (IsVoxelAt(x + xOffset, y + yOffset + (side == 5 ? -1 : 1), z + zOffset + 1, ref invoxels, chunk, nbs, ub0, ub1, ub2) ||
-                            IsVoxelAt(x + xOffset-1, y + yOffset + (side == 5 ? -1 : 1), z + zOffset + 1, ref invoxels, chunk, nbs, ub0, ub1, ub2) ||
-                            IsVoxelAt(x + xOffset-1, y + yOffset + (side == 5 ? -1 : 1), z + zOffset, ref invoxels, chunk, nbs, ub0, ub1, ub2)) voxelFace.VertShade |= Corners.TopRight;
-                        if (IsVoxelAt(x + xOffset, y + yOffset + (side == 5 ? -1 : 1), z + zOffset - 1, ref invoxels, chunk, nbs, ub0, ub1, ub2) ||
-                            IsVoxelAt(x + xOffset+1, y + yOffset + (side == 5 ? -1 : 1), z + zOffset - 1, ref invoxels, chunk, nbs, ub0, ub1, ub2) ||
-                            IsVoxelAt(x + xOffset+1, y + yOffset + (side == 5 ? -1 : 1), z + zOffset, ref invoxels, chunk, nbs, ub0, ub1, ub2)) voxelFace.VertShade |= Corners.BottomLeft;
-                        if (IsVoxelAt(x + xOffset, y + yOffset + (side == 5 ? -1 : 1), z + zOffset + 1, ref invoxels, chunk, nbs, ub0, ub1, ub2) ||
-                            IsVoxelAt(x + xOffset+1, y + yOffset + (side == 5 ? -1 : 1), z + zOffset + 1, ref invoxels, chunk, nbs, ub0, ub1, ub2) ||
-                            IsVoxelAt(x + xOffset+1, y + yOffset + (side == 5 ? -1 : 1), z + zOffset, ref invoxels, chunk, nbs, ub0, ub1, ub2)) voxelFace.VertShade |= Corners.BottomRight;
+                        if (IsVoxelAt(x + xOffset, y + yOffset + (side == 5 ? -lod : lod), z + zOffset - lod, ref invoxels, chunk, nbs, ub0, ub1, ub2) ||
+                            IsVoxelAt(x + xOffset-lod, y + yOffset + (side == 5 ? -lod : lod), z + zOffset - lod, ref invoxels, chunk, nbs, ub0, ub1, ub2) ||
+                            IsVoxelAt(x + xOffset-lod, y + yOffset + (side == 5 ? -lod : lod), z + zOffset, ref invoxels, chunk, nbs, ub0, ub1, ub2)) voxelFace.VertShade |= Corners.TopLeft;
+                        if (IsVoxelAt(x + xOffset, y + yOffset + (side == 5 ? -lod : lod), z + zOffset + lod, ref invoxels, chunk, nbs, ub0, ub1, ub2) ||
+                            IsVoxelAt(x + xOffset-lod, y + yOffset + (side == 5 ? -lod : lod), z + zOffset + lod, ref invoxels, chunk, nbs, ub0, ub1, ub2) ||
+                            IsVoxelAt(x + xOffset-lod, y + yOffset + (side == 5 ? -lod : lod), z + zOffset, ref invoxels, chunk, nbs, ub0, ub1, ub2)) voxelFace.VertShade |= Corners.TopRight;
+                        if (IsVoxelAt(x + xOffset, y + yOffset + (side == 5 ? -lod : lod), z + zOffset - lod, ref invoxels, chunk, nbs, ub0, ub1, ub2) ||
+                            IsVoxelAt(x + xOffset+lod, y + yOffset + (side == 5 ? -lod : lod), z + zOffset - lod, ref invoxels, chunk, nbs, ub0, ub1, ub2) ||
+                            IsVoxelAt(x + xOffset+lod, y + yOffset + (side == 5 ? -lod : lod), z + zOffset, ref invoxels, chunk, nbs, ub0, ub1, ub2)) voxelFace.VertShade |= Corners.BottomLeft;
+                        if (IsVoxelAt(x + xOffset, y + yOffset + (side == 5 ? -lod : lod), z + zOffset + lod, ref invoxels, chunk, nbs, ub0, ub1, ub2) ||
+                            IsVoxelAt(x + xOffset+lod, y + yOffset + (side == 5 ? -lod : lod), z + zOffset + lod, ref invoxels, chunk, nbs, ub0, ub1, ub2) ||
+                            IsVoxelAt(x + xOffset+lod, y + yOffset + (side == 5 ? -lod : lod), z + zOffset, ref invoxels, chunk, nbs, ub0, ub1, ub2)) voxelFace.VertShade |= Corners.BottomRight;
                         break;
                 }
             }
 
             switch (side)
             {
-                case 0: voxelFace.Active = !IsVoxelAt(x + xOffset, y + yOffset, z+zOffset - 1, ref invoxels, chunk, nbs, ub0, ub1, ub2); break;
-                case 1: voxelFace.Active = !IsVoxelAt(x + xOffset, y + yOffset, z + zOffset + 1, ref invoxels, chunk, nbs, ub0, ub1, ub2); break;
-                case 2: voxelFace.Active = !IsVoxelAt(x + xOffset + 1, y + yOffset, z + zOffset, ref invoxels, chunk, nbs, ub0, ub1, ub2); break;
-                case 3: voxelFace.Active = !IsVoxelAt(x + xOffset - 1, y + yOffset, z + zOffset, ref invoxels, chunk, nbs, ub0, ub1, ub2); break;
-                case 4: voxelFace.Active = !IsVoxelAt(x + xOffset, y + yOffset + 1, z + zOffset, ref invoxels, chunk, nbs, ub0, ub1, ub2); break;
-                case 5: voxelFace.Active = !IsVoxelAt(x + xOffset, y + yOffset - 1, z + zOffset, ref invoxels, chunk, nbs, ub0, ub1, ub2); break;
+                case 0: voxelFace.Active = !IsVoxelAt(x + xOffset, y + yOffset, z+zOffset - lod, ref invoxels, chunk, nbs, ub0, ub1, ub2); break;
+                case 1: voxelFace.Active = !IsVoxelAt(x + xOffset, y + yOffset, z + zOffset + lod, ref invoxels, chunk, nbs, ub0, ub1, ub2); break;
+                case 2: voxelFace.Active = !IsVoxelAt(x + xOffset + lod, y + yOffset, z + zOffset, ref invoxels, chunk, nbs, ub0, ub1, ub2); break;
+                case 3: voxelFace.Active = !IsVoxelAt(x + xOffset - lod, y + yOffset, z + zOffset, ref invoxels, chunk, nbs, ub0, ub1, ub2); break;
+                case 4: voxelFace.Active = !IsVoxelAt(x + xOffset, y + yOffset + lod, z + zOffset, ref invoxels, chunk, nbs, ub0, ub1, ub2); break;
+                case 5: voxelFace.Active = !IsVoxelAt(x + xOffset, y + yOffset - lod, z + zOffset, ref invoxels, chunk, nbs, ub0, ub1, ub2); break;
             }
 
         }
@@ -455,7 +458,7 @@ namespace PicaVoxel
             return invoxels[x + (ub0 + 1)*(y + (ub1 + 1)*z)].Active;
         }
     
-        static void Quad(Vector3 topLeft, Vector3 topRight, Vector3 bottomRight,Vector3 bottomLeft,int dir,float voxelSize,float overlapAmount, VoxelFace voxel, bool backFace,float selfShadeIntensity,List<Vector3> vertices, List<int> indexes, List<Color32> colors, List<Vector4> uvs)
+        static void Quad(Vector3 topLeft, Vector3 topRight, Vector3 bottomRight,Vector3 bottomLeft,int dir,float voxelSize,float lod,float overlapAmount, VoxelFace voxel, bool backFace,float selfShadeIntensity,List<Vector3> vertices, List<int> indexes, List<Color32> colors, List<Vector4> uvs)
         {
             int index = vertices.Count;
 
@@ -494,10 +497,10 @@ namespace PicaVoxel
                 }
             }
 
-            vertices.Add((bottomLeft * voxelSize) + overlapBL);
-            vertices.Add((bottomRight * voxelSize) + overlapBR);
-            vertices.Add((topLeft * voxelSize) + overlapTL);
-            vertices.Add((topRight * voxelSize) + overlapTR);
+            vertices.Add((bottomLeft * (voxelSize)) + overlapBL);
+            vertices.Add((bottomRight * (voxelSize)) + overlapBR);
+            vertices.Add((topLeft * (voxelSize)) + overlapTL);
+            vertices.Add((topRight * (voxelSize)) + overlapTR);
 
             Color temp = IntToColor(voxel.Color);
             int test1 = (((voxel.VertShade & Corners.TopRight) == Corners.TopRight) ? 1 : 0) + (((voxel.VertShade & Corners.BottomLeft) == Corners.BottomLeft) ? 1 : 0) + (((voxel.VertShade & Corners.TopLeft) == Corners.TopLeft) ? 1 : 0) + (((voxel.VertShade & Corners.BottomRight) == Corners.BottomRight) ? 1 : 0);
@@ -563,7 +566,7 @@ namespace PicaVoxel
     }
 
         public static void GenerateMarching(List<Vector3> vertices, List<Vector4> uvs, List<Color32> colors,
-            List<int> indexes, ref Voxel[] invoxels,Chunk chunk,Chunk[] nbs, float voxelSize, int xOffset, int yOffset, int zOffset,
+            List<int> indexes, ref Voxel[] invoxels,Chunk chunk,Chunk[] nbs, float voxelSize,int lod, int xOffset, int yOffset, int zOffset,
             int xSize, int ySize, int zSize, int ub0, int ub1, int ub2, float selfShadeIntensity)
         {
             vertices.Clear();

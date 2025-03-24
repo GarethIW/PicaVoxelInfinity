@@ -71,7 +71,7 @@ namespace PicaVoxel
         // Infinite mode will be for infinite terrain, which will keep generating as you move
         // Non-infinite will only add chunks when edited, and all chunks will be visible/rendered at startup
         public bool IsInfinite = false;
-        public int InfiniteChunkRadius;
+        public Vector3Int InfiniteChunkRadiusLODs = new Vector3Int(8,12,16);
         public Vector3Int InfiniteChunkBounds = Vector3Int.zero;
         public float InfiniteUpdateInterval = 0.25f;
         public int InfiniteUpdateSlicing = 8;
@@ -133,7 +133,7 @@ namespace PicaVoxel
                         {
                             if (!Chunks.ContainsKey((x, y, z)))
                                 Chunks[(x, y, z)] = Instantiate(ChunkPrefab, transform, false).GetComponent<Chunk>();
-                            Chunks[(x, y, z)].Initialize((x, y, z), this);
+                            Chunks[(x, y, z)].Initialize((x, y, z), 0,this);
                         }
             }
             else _isFirstPass = true;
@@ -163,7 +163,8 @@ namespace PicaVoxel
                 Vector3 camoffset = _cameraTransform.position- (transform.position-halfchunk);
                 Vector3 camChunkPos = camoffset / radunit;
                 Vector3Int ccpos = new Vector3Int(Mathf.RoundToInt(camChunkPos.x), Mathf.RoundToInt(camChunkPos.y), Mathf.RoundToInt(camChunkPos.z));
-                    
+                int[] lodrads = new[] { InfiniteChunkRadiusLODs.x, InfiniteChunkRadiusLODs.y, InfiniteChunkRadiusLODs.z };
+                
                 //Debug.Log(ccpos);
                 //float rad2 = ((InfiniteChunkRadius*radunit)*(InfiniteChunkRadius*radunit)) + ((radunit * 0.5f) * (radunit * 0.5f));
 
@@ -184,7 +185,7 @@ namespace PicaVoxel
                     if (_freeChunks.TryDequeue(out Chunk reuse))
                     {
                         Chunks.Add((ccpos.x,ccpos.y,ccpos.z), reuse);
-                        reuse.Initialize((ccpos.x,ccpos.y,ccpos.z), this);
+                        reuse.Initialize((ccpos.x,ccpos.y,ccpos.z), 2, this);
                     }
                 }
 
@@ -197,7 +198,7 @@ namespace PicaVoxel
                     {
                         Vector3Int cpos = new Vector3Int(chunk.Position.x, chunk.Position.y, chunk.Position.z);
 
-                        if ((ccpos - cpos).sqrMagnitude > InfiniteChunkRadius * InfiniteChunkRadius)
+                        if ((ccpos - cpos).sqrMagnitude > lodrads[2] * lodrads[2])
                         {
                             if (!_freeChunks.Contains(chunk))
                                 _freeChunks.Enqueue(chunk);
@@ -212,15 +213,15 @@ namespace PicaVoxel
                 }
                 
                 int s = 1;
-                for (int z = thisUpdateccpos.z-InfiniteChunkRadius; z < thisUpdateccpos.z +InfiniteChunkRadius; z++)
-                    for (int y = thisUpdateccpos.y-InfiniteChunkRadius; y < thisUpdateccpos.y +InfiniteChunkRadius; y++)
-                        for (int x = thisUpdateccpos.x - InfiniteChunkRadius; x < thisUpdateccpos.x + InfiniteChunkRadius; x++)
+                for (int z = thisUpdateccpos.z-lodrads[2]; z < thisUpdateccpos.z +lodrads[2]; z++)
+                    for (int y = thisUpdateccpos.y-lodrads[2]; y < thisUpdateccpos.y +lodrads[2]; y++)
+                        for (int x = thisUpdateccpos.x - lodrads[2]; x < thisUpdateccpos.x + lodrads[2]; x++)
                         {
                             if((InfiniteChunkBounds.x>0 && ( x<-InfiniteChunkBounds.x || x>InfiniteChunkBounds.x)) || (InfiniteChunkBounds.y>0 && (y<-InfiniteChunkBounds.y || y>InfiniteChunkBounds.y)) || (InfiniteChunkBounds.z>0 && (z<-InfiniteChunkBounds.z || z>InfiniteChunkBounds.z)))
                                 continue;
 
                             Vector3 cpos = new Vector3(x, y, z);
-                            if ((thisUpdateccpos - cpos).sqrMagnitude > InfiniteChunkRadius*InfiniteChunkRadius)
+                            if ((thisUpdateccpos - cpos).sqrMagnitude > lodrads[2]*lodrads[2])
                                 continue;
                             
                             if (!_isFirstPass)
@@ -230,13 +231,27 @@ namespace PicaVoxel
                                     s = 1;
                                 if (s != slice)
                                     continue;
-                                if ((thisUpdateccpos - cpos).sqrMagnitude < (InfiniteChunkRadius - InfiniteChunkRadiusUpdateMargin) * (InfiniteChunkRadius - InfiniteChunkRadiusUpdateMargin))
+                                if ((thisUpdateccpos - cpos).sqrMagnitude < (lodrads[0] - InfiniteChunkRadiusUpdateMargin) * (lodrads[0] - InfiniteChunkRadiusUpdateMargin))
                                     continue;
                             }
-
-                            if (Chunks.ContainsKey((x, y, z)))
+                            
+                            if (Chunks.TryGetValue((x, y, z), out Chunk chunk))
                             {
-                                if (!dataPass)
+                                int origlod = chunk.LodLevel;
+                                if ((thisUpdateccpos - cpos).sqrMagnitude <= (lodrads[0] * lodrads[0]) && chunk.LodLevel > 0)
+                                {
+                                    chunk.LodLevel = 0;
+                                }
+                                if ((thisUpdateccpos - cpos).sqrMagnitude > (lodrads[0] * lodrads[0]) && chunk.LodLevel != 1)
+                                {
+                                    chunk.LodLevel = 1;
+                                }
+                                if ((thisUpdateccpos - cpos).sqrMagnitude > (lodrads[1] * lodrads[1]) && chunk.LodLevel != 2)
+                                {
+                                    chunk.LodLevel = 2;
+                                }
+                                
+                                if (chunk.LodLevel==origlod && !dataPass)
                                 {
                                     Chunks[(x, y, z)].SetMeshDirty();
                                 }
@@ -246,13 +261,13 @@ namespace PicaVoxel
                             if (_freeChunks.TryDequeue(out Chunk reuse))
                             {
                                 Chunks.Add((x, y, z), reuse);
-                                reuse.Initialize((x, y, z), this);
+                                reuse.Initialize((x, y, z), 2, this);
                             }
                             else
                             {
                                 //Debug.Log($"No available chunks to re-use at {x}, {y}, {z}");
                                 Chunks[(x, y, z)] = Instantiate(ChunkPrefab, transform, false).GetComponent<Chunk>();
-                                Chunks[(x, y, z)].Initialize((x, y, z), this);
+                                Chunks[(x, y, z)].Initialize((x, y, z), 2, this);
                             }
                         }
 

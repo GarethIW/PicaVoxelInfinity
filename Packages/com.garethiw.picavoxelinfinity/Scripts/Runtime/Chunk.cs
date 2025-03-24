@@ -46,7 +46,23 @@ namespace PicaVoxel
 
         // Is chunk free to be reused?
         public bool CanBeReused;
-        
+
+        private int _lodLevel =0;
+
+        public int LodLevel
+        {
+            get
+            {
+                return _lodLevel;
+            } 
+            set
+            {
+                _lodLevel = value;
+                _isDataDirty = true;
+                _isMeshDirty = true;
+            }
+        }
+
         private bool _isDataDirty = false;
         private bool _isMeshDirty = false;
         private ChunkStatus status = ChunkStatus.NoChange;
@@ -66,7 +82,7 @@ namespace PicaVoxel
         private bool _disableMrNextFrame= false;
         /////////////////////////////////////////////////////////////////
         
-        public void Initialize((int, int, int) pos, Volume parentVolume)
+        public void Initialize((int, int, int) pos, int lodLevel, Volume parentVolume)
         {
             _volume = parentVolume;
             if (mf is null) mf = GetComponent<MeshFilter>();
@@ -80,6 +96,7 @@ namespace PicaVoxel
             if (mf.sharedMesh is null)
                 mf.sharedMesh = new Mesh();
             _isDataDirty = true;
+            _lodLevel = lodLevel;
             #if UNITY_EDITOR
             gameObject.name = $"Chunk {Position.x},{Position.y},{Position.z}";
             #endif
@@ -95,12 +112,32 @@ namespace PicaVoxel
             }
 
             _hasData = false;
+            Voxel v = new Voxel();
             //Debug.Log($"Chunk {Position.x},{Position.y},{Position.z} is doing data gen");
-            for (int z = 0; z < Volume.ChunkSize; z++)
-                for (int y = 0; y < Volume.ChunkSize; y++)
-                    for (int x = 0; x < Volume.ChunkSize; x++)
+            int lodStep = _lodLevel+1;
+            if (lodStep == 3) lodStep = 4;
+            
+            for (int z = 0; z < Volume.ChunkSize; z+=lodStep)
+                for (int y = 0; y < Volume.ChunkSize; y+=lodStep)
+                    for (int x = 0; x < Volume.ChunkSize; x+=lodStep)
                     {
-                        Volume.GenerateVoxel(x + (Volume.ChunkSize * Position.x), y + (Volume.ChunkSize * Position.y), z + (Volume.ChunkSize * Position.z), ref Voxels[x + Volume.ChunkSize * (y + Volume.ChunkSize * z)]);
+                        if (_lodLevel == 0)
+                        {
+                            Volume.GenerateVoxel(x + (Volume.ChunkSize * Position.x), y + (Volume.ChunkSize * Position.y), z + (Volume.ChunkSize * Position.z), ref Voxels[x + Volume.ChunkSize * (y + Volume.ChunkSize * z)]);
+                        }
+                        else
+                        {
+                            Volume.GenerateVoxel(x + (Volume.ChunkSize * Position.x), y + (Volume.ChunkSize * Position.y), z + (Volume.ChunkSize * Position.z), ref v);
+                            for (int zz = z; zz < z+lodStep; zz++)
+                                for (int yy = y; yy < y+lodStep; yy++)
+                                    for (int xx = x; xx < x + lodStep; xx++)
+                                    {
+                                        if(xx>=Volume.ChunkSize)
+                                            Debug.LogError($"oob: {xx} {x} {lodStep}");
+                                        Voxels[xx + Volume.ChunkSize * (yy + Volume.ChunkSize * zz)] = v;
+                                    }
+                        }
+                        
                         if(!_hasData && Voxels[x + Volume.ChunkSize * (y + Volume.ChunkSize * z)].Active)
                             _hasData = true;
                     }
@@ -153,7 +190,7 @@ namespace PicaVoxel
                 _disableMrNextFrame= false;
             }
             
-            if (status == ChunkStatus.NoChange && _isMeshDirty)
+            if (status == ChunkStatus.NoChange && _isMeshDirty && !_isDataDirty)
             {
                 //Debug.Log($"Chunk {Position.x},{Position.y},{Position.z} has dirty mesh");
                 _isMeshDirty = false;
@@ -183,6 +220,9 @@ namespace PicaVoxel
         
         public void GenerateMesh(bool immediate)
         {
+            if (!_hasData)
+                return;
+            
             if (immediate)
             {
                 GenerateMeshActual(Volume.MeshingMode);
@@ -233,13 +273,13 @@ namespace PicaVoxel
             switch (meshMode)
             {
                 case MeshingMode.Culled:
-                    MeshGenerator.GenerateCulled(vertices, uvs, colors, indexes, ref Voxels, this, _neighbours, Volume.VoxelSize, 0f,0, 0, 0, Volume.ChunkSize, Volume.ChunkSize, Volume.ChunkSize, Volume.ChunkSize-1, Volume.ChunkSize-1, Volume.ChunkSize-1, Volume.SelfShadingIntensity);
+                    MeshGenerator.GenerateCulled(vertices, uvs, colors, indexes, ref Voxels, this, _neighbours, Volume.VoxelSize, _lodLevel, 0f,0, 0, 0, Volume.ChunkSize, Volume.ChunkSize, Volume.ChunkSize, Volume.ChunkSize-1, Volume.ChunkSize-1, Volume.ChunkSize-1, Volume.SelfShadingIntensity);
                     break;
                 case MeshingMode.Greedy:
-                    MeshGenerator.GenerateGreedy(vertices, uvs, colors, indexes, ref Voxels, this,_neighbours,Volume.VoxelSize, 0f,0, 0, 0, Volume.ChunkSize, Volume.ChunkSize, Volume.ChunkSize, Volume.ChunkSize-1, Volume.ChunkSize-1, Volume.ChunkSize-1, Volume.SelfShadingIntensity);
+                    MeshGenerator.GenerateGreedy(vertices, uvs, colors, indexes, ref Voxels, this,_neighbours,Volume.VoxelSize, _lodLevel,0f,0, 0, 0, Volume.ChunkSize, Volume.ChunkSize, Volume.ChunkSize, Volume.ChunkSize-1, Volume.ChunkSize-1, Volume.ChunkSize-1, Volume.SelfShadingIntensity);
                     break;
                 case MeshingMode.Marching:
-                    MeshGenerator.GenerateMarching(vertices, uvs, colors, indexes, ref Voxels, this,_neighbours,Volume.VoxelSize, 0, 0, 0, Volume.ChunkSize, Volume.ChunkSize, Volume.ChunkSize, Volume.ChunkSize-1, Volume.ChunkSize-1, Volume.ChunkSize-1, Volume.SelfShadingIntensity);
+                    MeshGenerator.GenerateMarching(vertices, uvs, colors, indexes, ref Voxels, this,_neighbours,Volume.VoxelSize, _lodLevel,0, 0, 0, Volume.ChunkSize, Volume.ChunkSize, Volume.ChunkSize, Volume.ChunkSize-1, Volume.ChunkSize-1, Volume.ChunkSize-1, Volume.SelfShadingIntensity);
                     break;
             }    
         }

@@ -127,7 +127,7 @@ GameObject:
   m_CorrespondingSourceObject: {fileID: 6945259711021768169, guid: 7ca31ec7178fc1c44b515a9f52309c74, type: 3}
   m_PrefabInstance: {fileID: 223527215}
   m_PrefabAsset: {fileID: 0}
---- !u!114 &22875499
+--- !u!114 &22875502
 MonoBehaviour:
   m_ObjectHideFlags: 0
   m_CorrespondingSourceObject: {fileID: 0}
@@ -224,7 +224,7 @@ PrefabInstance:
       objectReference: {fileID: 0}
     - target: {fileID: 5643125257099105075, guid: 7ca31ec7178fc1c44b515a9f52309c74, type: 3}
       propertyPath: InfiniteChunkRadius
-      value: 16
+      value: 24
       objectReference: {fileID: 0}
     - target: {fileID: 5643125257099105075, guid: 7ca31ec7178fc1c44b515a9f52309c74, type: 3}
       propertyPath: SelfShadingIntensity
@@ -256,7 +256,7 @@ PrefabInstance:
     m_AddedComponents:
     - targetCorrespondingSourceObject: {fileID: 6945259711021768169, guid: 7ca31ec7178fc1c44b515a9f52309c74, type: 3}
       insertIndex: -1
-      addedObject: {fileID: 22875499}
+      addedObject: {fileID: 22875502}
   m_SourcePrefab: {fileID: 100100000, guid: 7ca31ec7178fc1c44b515a9f52309c74, type: 3}
 --- !u!1 &705507993
 GameObject:
