@@ -518,10 +518,12 @@ namespace PicaVoxel
             }
 
             mf.sharedMesh.RecalculateBounds();
+            // Enable before assigning: a mesh assigned to a disabled MeshCollider is silently dropped, which left
+            // recycled chunks (disabled while empty or pooled) visible but with nothing to stand on.
+            mc.enabled = true;
             // Re-assigning the same Mesh instance doesn't reliably rebake the collider, so clear it first
             mc.sharedMesh = null;
             mc.sharedMesh = mf.sharedMesh;
-            mc.enabled = true;
         }
 
         public void SetMeshDirty()
