@@ -40,10 +40,24 @@ namespace PicaVoxel
         // Is chunk free to be reused?
         public bool CanBeReused;
         
-        private bool _isDataDirty = false;
+        private volatile bool _isDataDirty = false;
         private bool _isChangesDirty = false;
-        private bool _isMeshDirty = false;
-        private ChunkStatus status = ChunkStatus.NoChange;
+        private volatile bool _isMeshDirty = false;
+        private volatile ChunkStatus status = ChunkStatus.NoChange;
+
+        // Incremented every time this chunk is (re)initialized or released. Background data/mesh jobs capture the
+        // value they were started with and throw their results away if the chunk has since been recycled.
+        private volatile int _generation = 0;
+        private readonly object _generationLock = new object();
+        // True while a background data generation job is running for this chunk (of any generation)
+        private volatile bool _isGeneratingData = false;
+        // True once voxel data for the current generation has been fully generated
+        private volatile bool _dataReady = false;
+        // Set when this chunk's voxels change, so face-adjacent neighbours re-mesh their culled border faces
+        private volatile bool _notifyNeighbours = false;
+        // Generation the in-flight / last mesh job was started for, and whether it failed
+        private int _meshJobGeneration = -1;
+        private volatile bool _meshJobFailed = false;
 
         private float _persistTime = 0f;
         
@@ -61,7 +75,7 @@ namespace PicaVoxel
         private bool hasCreatedRuntimeMesh = false;
         private bool hasCreatedRuntimeColMesh = false;
         private bool updateColliderNextFrame = false;
-        private bool _disableMrNextFrame= false;
+        private volatile bool _disableMrNextFrame= false;
         /////////////////////////////////////////////////////////////////
         
         public void Initialize((int, int, int) pos, Volume parentVolume)
@@ -70,7 +84,13 @@ namespace PicaVoxel
             if (mf is null) mf = GetComponent<MeshFilter>();
             if (mr is null) mr = GetComponent<MeshRenderer>();
             if (mc is null) mc = GetComponent<MeshCollider>();
-            mr.enabled = false;
+            // Invalidate any background jobs still running for this chunk's previous position, and clear out
+            // everything left over from it (mesh, collider, pending edits) before it is moved.
+            lock (_generationLock)
+            {
+                _generation++;
+            }
+            ResetState();
             Position = pos;
             transform.localPosition = new Vector3((Position.x*Volume.ChunkSize)-(Volume.ChunkSize*0.5f), (Position.y*Volume.ChunkSize)-(Volume.ChunkSize*0.5f), (Position.z*Volume.ChunkSize)-(Volume.ChunkSize*0.5f)) * Volume.VoxelSize;
             gameObject.layer = Volume.ChunkLayer;
@@ -84,39 +104,123 @@ namespace PicaVoxel
             #endif
         }
 
-        private bool _hasData = false;
-        private void GenerateData()
+        private volatile bool _hasData = false;
+
+        /// <summary>
+        /// Resets all per-position state so a chunk can be safely recycled. Main thread only.
+        /// </summary>
+        private void ResetState()
         {
-            if (!Volume.IsDataReady)
+            if (mr is not null) mr.enabled = false;
+            if (mc is not null)
             {
-                _isDataDirty = true;
-                return;
+                mc.enabled = false;
+                mc.sharedMesh = null;
             }
+            if (mf is not null && mf.sharedMesh is not null)
+                mf.sharedMesh.Clear();
 
             _hasData = false;
-            //Debug.Log($"Chunk {Position.x},{Position.y},{Position.z} is doing data gen");
-            for (int z = 0; z < Volume.ChunkSize; z++)
-                for (int y = 0; y < Volume.ChunkSize; y++)
-                    for (int x = 0; x < Volume.ChunkSize; x++)
-                    {
-                        Volume.GenerateVoxel(x + (Volume.ChunkSize * Position.x), y + (Volume.ChunkSize * Position.y), z + (Volume.ChunkSize * Position.z), ref Voxels[x + Volume.ChunkSize * (y + Volume.ChunkSize * z)]);
-                        if(!_hasData && Voxels[x + Volume.ChunkSize * (y + Volume.ChunkSize * z)].Active)
-                            _hasData = true;
-                    }
-            
-            foreach (I_ChunkProcessor p in _volume.ChunkProcessors)
-            {
-                if (p.Schedule == ProcessingSchedule.AfterGeneration)
-                    p.ProcessChunk(_volume, this);
-            }
-            //Debug.Log($"Chunk {Position.x},{Position.y},{Position.z} is finished data gen");
+            _dataReady = false;
+            _isDataDirty = false;
+            _isMeshDirty = false;
+            _notifyNeighbours = false;
+            _disableMrNextFrame = false;
+            updateColliderNextFrame = false;
+            _changes.Clear();
+            _persistTime = 0f;
+        }
 
-            _volume.LoadChunkChanges(Position);
-            
-            if (!_hasData)
-                _disableMrNextFrame = true;
-            else if (!Volume.IsInfinite)
-                _isMeshDirty = true;
+        /// <summary>
+        /// Called by the volume when this chunk goes out of range and is put in the pool for re-use.
+        /// Hides it, removes its collider and invalidates any background work still running for it.
+        /// </summary>
+        public void Release()
+        {
+            // Don't lose edits that haven't been persisted yet
+            if (_changes.Count > 0 && _persistTime > 0f)
+                SaveChanges();
+
+            lock (_generationLock)
+            {
+                _generation++;
+            }
+            ResetState();
+        }
+
+        private void GenerateData(int generation, (int x, int y, int z) pos)
+        {
+            try
+            {
+                if (!Volume.IsDataReady)
+                {
+                    _isDataDirty = true;
+                    return;
+                }
+
+                bool hasData = false;
+                //Debug.Log($"Chunk {pos.x},{pos.y},{pos.z} is doing data gen");
+                for (int z = 0; z < Volume.ChunkSize; z++)
+                {
+                    // Chunk was recycled while we were generating; abandon this job
+                    if (generation != _generation)
+                        return;
+
+                    for (int y = 0; y < Volume.ChunkSize; y++)
+                        for (int x = 0; x < Volume.ChunkSize; x++)
+                        {
+                            Volume.GenerateVoxel(x + (Volume.ChunkSize * pos.x), y + (Volume.ChunkSize * pos.y), z + (Volume.ChunkSize * pos.z), ref Voxels[x + Volume.ChunkSize * (y + Volume.ChunkSize * z)]);
+                            if (!hasData && Voxels[x + Volume.ChunkSize * (y + Volume.ChunkSize * z)].Active)
+                                hasData = true;
+                        }
+                }
+
+                lock (_generationLock)
+                {
+                    if (generation != _generation)
+                        return;
+                    _hasData = hasData;
+                }
+
+                foreach (I_ChunkProcessor p in _volume.ChunkProcessors)
+                {
+                    if (p.Schedule == ProcessingSchedule.AfterGeneration)
+                        p.ProcessChunk(_volume, this);
+                }
+                //Debug.Log($"Chunk {pos.x},{pos.y},{pos.z} is finished data gen");
+
+                // May apply persisted edits synchronously (which can also change _hasData)
+                _volume.LoadChunkChanges(pos);
+
+                lock (_generationLock)
+                {
+                    if (generation != _generation)
+                        return;
+
+                    _dataReady = true;
+
+                    // Always queue a mesh once data is ready (previously only in finite mode, which left infinite
+                    // chunks without a mesh/collider if the volume's mesh pass reached them before data finished).
+                    if (_hasData)
+                        _isMeshDirty = true;
+                    else
+                        _disableMrNextFrame = true;
+
+                    // Neighbours may have meshed against this chunk's stale/incomplete voxels, re-mesh their borders
+                    _notifyNeighbours = true;
+                }
+            }
+            catch (Exception ex)
+            {
+                Debug.LogException(ex);
+                // Retry on the next update rather than leaving the chunk permanently empty
+                if (generation == _generation)
+                    _isDataDirty = true;
+            }
+            finally
+            {
+                _isGeneratingData = false;
+            }
         }
 
         public Voxel? GetVoxel((int x, int y, int z) pos)
@@ -198,52 +302,47 @@ namespace PicaVoxel
             if (!_hasData && mr.enabled)
                 mr.enabled = false;
             
-            if (_isDataDirty)
+            // Only one data job per chunk at a time. If the chunk was recycled while an old job is still running,
+            // wait for it to bail out before starting the new one (both would write into the same Voxels array).
+            if (_isDataDirty && !_isGeneratingData)
             {
                 //Debug.Log($"Chunk {Position.x},{Position.y},{Position.z} has dirty data");
 
                 _isDataDirty = false;
+                _isGeneratingData = true;
+                int generation = _generation;
+                (int x, int y, int z) pos = Position;
 
-                if (!ThreadPool.QueueUserWorkItem(delegate
-                    {
-                        try
-                        {
-                            GenerateData();
-                            // The volume will set the mesh to be regenerated once all chunks have queued data load
-                            // if(!_hasData)
-                            //     return;
-                            // Thread.Sleep(25);
-                            // GenerateMeshThreaded(Volume.MeshingMode);
-                        }
-                        catch (Exception ex)
-                        {
-                            Debug.LogException(ex);
-                        }
-                    })
-                   )
+                if (!ThreadPool.QueueUserWorkItem(delegate { GenerateData(generation, pos); }))
+                {
+                    _isGeneratingData = false;
                     _isDataDirty = true;
+                }
             }
-            
-            if (status == ChunkStatus.NoChange && _isMeshDirty)
+
+            if (_notifyNeighbours)
             {
-                //Debug.Log($"Chunk {Position.x},{Position.y},{Position.z} has dirty mesh");
-                _isMeshDirty = false;
-                GenerateMesh(false);
+                _notifyNeighbours = false;
+                NotifyNeighbours();
             }
             
             if (status == ChunkStatus.Ready)
             {
                 status = ChunkStatus.NoChange;
-                if (!_isMeshDirty)
+                // Discard results from a job started before this chunk was recycled, or one that failed
+                if (_meshJobGeneration == _generation && !_meshJobFailed)
                 {
+                    // Apply what we have even if another re-mesh is pending; it'll be replaced shortly, and it's
+                    // better than showing nothing (or a stale mesh) in the meantime.
                     SetMesh();
-                    mr.enabled = true;
                 }
-                else
-                {
-                    _isMeshDirty = false;
-                    GenerateMesh(false);
-                }
+            }
+
+            if (status == ChunkStatus.NoChange && _isMeshDirty && _dataReady && !_isGeneratingData)
+            {
+                //Debug.Log($"Chunk {Position.x},{Position.y},{Position.z} has dirty mesh");
+                _isMeshDirty = false;
+                GenerateMesh(false);
             }
             
             if (_disableMrNextFrame)
@@ -258,17 +357,53 @@ namespace PicaVoxel
                 UpdateCollider();
             }
         }
+
+        /// <summary>
+        /// Flags the 6 face-adjacent chunks for re-meshing, since their culled border faces depend on our voxels.
+        /// Main thread only.
+        /// </summary>
+        private void NotifyNeighbours()
+        {
+            Volume.GetChunk((Position.x - 1, Position.y, Position.z))?.SetMeshDirty();
+            Volume.GetChunk((Position.x + 1, Position.y, Position.z))?.SetMeshDirty();
+            Volume.GetChunk((Position.x, Position.y - 1, Position.z))?.SetMeshDirty();
+            Volume.GetChunk((Position.x, Position.y + 1, Position.z))?.SetMeshDirty();
+            Volume.GetChunk((Position.x, Position.y, Position.z - 1))?.SetMeshDirty();
+            Volume.GetChunk((Position.x, Position.y, Position.z + 1))?.SetMeshDirty();
+        }
+
+        /// <summary>
+        /// Snapshot neighbour chunk references on the main thread, so mesh jobs never touch the Chunks dictionary
+        /// from a worker thread while the volume is adding/removing chunks.
+        /// </summary>
+        private void GatherNeighbours()
+        {
+            for(int x=0;x<3;x++)
+                for(int y=0;y<3;y++)
+                    for(int z=0;z<3;z++)
+                        _neighbours[x + 3 * (y + 3 * z)] = Volume.GetChunk((Position.x+(x-1),Position.y+(y-1),Position.z+(z-1)));
+        }
         
         public void GenerateMesh(bool immediate)
         {
+            // Can't mesh while a background job is using the shared vertex lists, or while voxel data is still
+            // being generated (we'd mesh half-written data). Defer; CheckGeneration will pick it up.
+            if (status != ChunkStatus.NoChange || _isGeneratingData || !_dataReady)
+            {
+                _isMeshDirty = true;
+                return;
+            }
+
+            GatherNeighbours();
+
             if (immediate)
             {
                 GenerateMeshActual(Volume.MeshingMode);
                 mr.enabled = _hasData;
                 if (_hasData)
                 {
-                    SetMesh();
-                    if (Volume.CollisionMode != CollisionMode.None)
+                    bool hasMesh = SetMesh();
+                    if (hasMesh && Volume.CollisionMode != CollisionMode.None)
                     {
                         if(Volume.MeshColliderMeshingMode!=Volume.MeshingMode)
                             GenerateMeshActual(Volume.MeshColliderMeshingMode);
@@ -282,29 +417,36 @@ namespace PicaVoxel
             }
             else
             {
-                if (status != ChunkStatus.NoChange)
+                // Mark busy *before* queueing so a second job can't be started for this chunk in the meantime
+                status = ChunkStatus.CalculatingMesh;
+                _meshJobGeneration = _generation;
+                _meshJobFailed = false;
+                MeshingMode meshMode = Volume.MeshingMode;
+
+                if (!ThreadPool.QueueUserWorkItem(delegate { GenerateMeshThreaded(meshMode); }))
                 {
+                    status = ChunkStatus.NoChange;
                     _isMeshDirty = true;
                 }
-    
-                if(!ThreadPool.QueueUserWorkItem(delegate
-                    {
-                        GenerateMeshThreaded(Volume.MeshingMode);
-                    })
-                ) 
-                    GenerateMeshActual(Volume.MeshingMode);
-
             }
         }
         
         private void GenerateMeshThreaded(MeshingMode meshMode)
         {
-            
-            status = ChunkStatus.CalculatingMesh;
-
-            GenerateMeshActual(meshMode);
-         
-            status = ChunkStatus.Ready;
+            try
+            {
+                GenerateMeshActual(meshMode);
+            }
+            catch (Exception ex)
+            {
+                // Previously an exception here left status stuck at CalculatingMesh, so the chunk never meshed again
+                _meshJobFailed = true;
+                Debug.LogException(ex);
+            }
+            finally
+            {
+                status = ChunkStatus.Ready;
+            }
         }
 
         private Chunk[] _neighbours = new Chunk[27];
@@ -315,11 +457,6 @@ namespace PicaVoxel
                 if (p.Schedule == ProcessingSchedule.BeforeMeshing)
                     p.ProcessChunk(_volume, this);
             }
-            
-            for(int x=0;x<3;x++)
-                for(int y=0;y<3;y++)
-                    for(int z=0;z<3;z++)
-                        _neighbours[x + 3 * (y + 3 * z)] = Volume.GetChunk((Position.x+(x-1),Position.y+(y-1),Position.z+(z-1)));
             
             switch (meshMode)
             {
@@ -335,11 +472,19 @@ namespace PicaVoxel
             }    
         }
 
-        private void SetMesh()
+        /// <summary>
+        /// Applies the generated vertex lists to the chunk's mesh. Returns false if there was nothing to show.
+        /// </summary>
+        private bool SetMesh()
         {
             if (vertices.Count == 0)
             {
-                return;
+                // Don't leave a previous mesh/collider behind (e.g. last block removed, or fully enclosed chunk)
+                mf.sharedMesh.Clear();
+                mr.enabled = false;
+                mc.enabled = false;
+                updateColliderNextFrame = false;
+                return false;
             }
 
             mr.shadowCastingMode = Volume.CastShadows;
@@ -358,14 +503,25 @@ namespace PicaVoxel
             {
                 updateColliderNextFrame = true;
             }
+
+            mr.enabled = _hasData;
+            return true;
         }
 
         private void UpdateCollider()
         {
+            updateColliderNextFrame = false;
+            if (!_hasData || mf.sharedMesh.vertexCount == 0)
+            {
+                mc.enabled = false;
+                return;
+            }
+
             mf.sharedMesh.RecalculateBounds();
+            // Re-assigning the same Mesh instance doesn't reliably rebake the collider, so clear it first
+            mc.sharedMesh = null;
             mc.sharedMesh = mf.sharedMesh;
             mc.enabled = true;
-            updateColliderNextFrame = false;
         }
 
         public void SetMeshDirty()
@@ -420,6 +576,8 @@ namespace PicaVoxel
             
             EvaluateData();
             _isMeshDirty = true;
+            // Loaded edits may touch our borders
+            _notifyNeighbours = true;
         }
         
         private bool SaveChanges()

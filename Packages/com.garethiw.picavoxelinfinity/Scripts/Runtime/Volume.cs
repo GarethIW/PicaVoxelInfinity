@@ -75,6 +75,9 @@ namespace PicaVoxel
         public Vector3 Pivot = Vector3.zero;
 
         public Dictionary<(int, int, int), Chunk> Chunks = new();
+        // Chunk data jobs (e.g. chunk processors, persisters) look up chunks from worker threads, so any
+        // structural change to Chunks must be done under this lock.
+        private readonly object _chunksLock = new object();
 
         public int MaxValue;
         public CustomBlock[] CustomBlocks = Array.Empty<CustomBlock>();
@@ -275,8 +278,19 @@ namespace PicaVoxel
                         }
                     }
 
-                    foreach (Chunk chunk in _freeChunks)
-                        Chunks.Remove(chunk.Position);
+                    lock (_chunksLock)
+                    {
+                        foreach (Chunk chunk in _freeChunks)
+                        {
+                            if (Chunks.TryGetValue(chunk.Position, out Chunk existing) && existing == chunk)
+                            {
+                                Chunks.Remove(chunk.Position);
+                                // Hide it and drop its collider; otherwise it stays visible/solid at its old
+                                // position until it happens to be re-used
+                                chunk.Release();
+                            }
+                        }
+                    }
 
                     slice++;
                     return;
@@ -323,14 +337,17 @@ namespace PicaVoxel
 
                             if (_freeChunks.TryDequeue(out Chunk reuse))
                             {
-                                Chunks.Add((x, y, z), reuse);
                                 reuse.Initialize((x, y, z), this);
+                                lock (_chunksLock)
+                                    Chunks.Add((x, y, z), reuse);
                             }
                             else
                             {
                                 //Debug.Log($"No available chunks to re-use at {x}, {y}, {z}");
-                                Chunks[(x, y, z)] = Instantiate(ChunkPrefab, transform, false).GetComponent<Chunk>();
-                                Chunks[(x, y, z)].Initialize((x, y, z), this);
+                                Chunk newChunk = Instantiate(ChunkPrefab, transform, false).GetComponent<Chunk>();
+                                newChunk.Initialize((x, y, z), this);
+                                lock (_chunksLock)
+                                    Chunks[(x, y, z)] = newChunk;
                             }
                         }
 
@@ -445,7 +462,8 @@ namespace PicaVoxel
         [CanBeNull]
         public Chunk GetChunk((int x, int y, int z) pos)
         {
-            return Chunks.GetValueOrDefault(pos);
+            lock (_chunksLock)
+                return Chunks.GetValueOrDefault(pos);
         }
 
         public Voxel? GetVoxelAtWorldPosition(Vector3 worldPos, out Chunk chunk, out (int x, int y, int z) pos)
