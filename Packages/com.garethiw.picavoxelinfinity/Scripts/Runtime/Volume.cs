@@ -108,7 +108,11 @@ namespace PicaVoxel
         public MeshingMode MeshColliderMeshingMode;
         public bool GenerateMeshColliderSeparately = false;
         public Material Material;
+#if UNITY_6000_0_OR_NEWER
+        public PhysicsMaterial PhysicMaterial;
+#else
         public PhysicMaterial PhysicMaterial;
+#endif
         public bool CollisionTrigger;
         public CollisionMode CollisionMode;
         public float SelfShadingIntensity = 0.2f;
