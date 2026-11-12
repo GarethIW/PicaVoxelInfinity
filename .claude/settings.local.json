@@ -1,0 +1,11 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(mkdir -p \"H:/Projects/PicaVoxelInfinity/Packages/com.garethiw.picavoxelinfinity/Shaders/URP\")",
+      "Bash(mkdir -p \"H:/Projects/PicaVoxelInfinity/Packages/com.garethiw.picavoxelinfinity/Materials/URP\")",
+      "Bash(python3:*)",
+      "Bash(uuidgen)",
+      "Bash(powershell -Command \"[guid]::NewGuid\\(\\).ToString\\('N'\\)\")"
+    ]
+  }
+}
