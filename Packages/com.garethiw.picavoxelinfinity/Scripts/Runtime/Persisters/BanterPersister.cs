@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Net;
@@ -43,7 +43,13 @@ namespace PicaVoxel
         {
             string key = $"{SpaceName}_{vol.Identifier.Replace("{", "").Replace("}", "")}_{x}_{y}_{z}";
 
-            _ = Task.Run(()=>PostDataAsync(key, data));
+            byte[] payload = new byte[12 + data.Length];
+            Buffer.BlockCopy(BitConverter.GetBytes(x), 0, payload, 0, 4);
+            Buffer.BlockCopy(BitConverter.GetBytes(y), 0, payload, 4, 4);
+            Buffer.BlockCopy(BitConverter.GetBytes(z), 0, payload, 8, 4);
+            Buffer.BlockCopy(data, 0, payload, 12, data.Length);
+
+            _ = Task.Run(()=>PostDataAsync(key, payload));
 
             return true;
         }
@@ -103,6 +109,7 @@ namespace PicaVoxel
                         try
                         {
                             string[] keysplit = keys.Split(',');
+                            int recordSize = 12 + Voxel.BYTE_SIZE;
 
                             using (MemoryStream stream = new MemoryStream(task.Result))
                             {
@@ -120,19 +127,47 @@ namespace PicaVoxel
                                         
                                         byte[] data = reader.ReadBytes(l);
 
-                                        string key = keysplit[n];
-                                        string[] parts = key.Split('_');
+                                        int cx = 0;
+                                        int cy = 0;
+                                        int cz = 0;
+                                        byte[] strippedData = null;
 
-                                        //Debug.Log($"{n}: {key}");
-                                        
+                                        if (l % recordSize == 0)
+                                        {
+                                            // Old format: parse coordinates from the end of the key
+                                            string key = keysplit[n];
+                                            string[] parts = key.Split('_');
+                                            cx = int.Parse(parts[parts.Length - 3]);
+                                            cy = int.Parse(parts[parts.Length - 2]);
+                                            cz = int.Parse(parts[parts.Length - 1]);
+                                            strippedData = data;
+
+                                            // Auto-migrate: save the new format back to the server
+                                            SaveChunk(_volume, cx, cy, cz, data);
+                                        }
+                                        else if (l >= 12 && (l - 12) % recordSize == 0)
+                                        {
+                                            // New format: parse coordinates from header
+                                            cx = BitConverter.ToInt32(data, 0);
+                                            cy = BitConverter.ToInt32(data, 4);
+                                            cz = BitConverter.ToInt32(data, 8);
+
+                                            strippedData = new byte[l - 12];
+                                            Buffer.BlockCopy(data, 12, strippedData, 0, l - 12);
+                                        }
+                                        else
+                                        {
+                                            n++;
+                                            continue;
+                                        }
+
                                         n++;
-                                        
-                                        Chunk c = _volume.GetChunk((int.Parse(parts[2]), int.Parse(parts[3]),
-                                            int.Parse(parts[4])));
+
+                                        Chunk c = _volume.GetChunk((cx, cy, cz));
                                         if (!c)
                                             continue;
 
-                                        c.LoadChanges(data);
+                                        c.LoadChanges(strippedData);
                                     }
                                 }
                             }

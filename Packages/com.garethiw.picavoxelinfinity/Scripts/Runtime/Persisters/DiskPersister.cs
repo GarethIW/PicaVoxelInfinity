@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Net;
 using System.IO;
 using UnityEngine;
@@ -28,9 +28,15 @@ namespace PicaVoxel
             
             string fn = Path.Combine(_basePath, $"{vol.Identifier}_{x}_{y}_{z}.chunk");
 
+            byte[] payload = new byte[12 + data.Length];
+            Buffer.BlockCopy(BitConverter.GetBytes(x), 0, payload, 0, 4);
+            Buffer.BlockCopy(BitConverter.GetBytes(y), 0, payload, 4, 4);
+            Buffer.BlockCopy(BitConverter.GetBytes(z), 0, payload, 8, 4);
+            Buffer.BlockCopy(data, 0, payload, 12, data.Length);
+
             try
             {
-                File.WriteAllBytes(fn, data);
+                File.WriteAllBytes(fn, payload);
             }
             catch (Exception e)
             {
@@ -61,11 +67,48 @@ namespace PicaVoxel
                 return false;
             }
 
+            int recordSize = 12 + Voxel.BYTE_SIZE;
+            int cx, cy, cz;
+            byte[] strippedData;
+
+            if (data.Length % recordSize == 0)
+            {
+                // Old format: coordinates are the expected x, y, z
+                cx = x;
+                cy = y;
+                cz = z;
+                strippedData = data;
+
+                // Auto-migrate: save the new format back to disk
+                SaveChunk(vol, x, y, z, data);
+            }
+            else if (data.Length >= 12 && (data.Length - 12) % recordSize == 0)
+            {
+                // New format: read coordinates from header
+                cx = BitConverter.ToInt32(data, 0);
+                cy = BitConverter.ToInt32(data, 4);
+                cz = BitConverter.ToInt32(data, 8);
+
+                if (cx != x || cy != y || cz != z)
+                {
+                    Debug.LogError($"DiskPersister LoadChunk coordinate mismatch! Expected ({x},{y},{z}) but got ({cx},{cy},{cz}) in file {fn}");
+                    return false;
+                }
+
+                strippedData = new byte[data.Length - 12];
+                Buffer.BlockCopy(data, 12, strippedData, 0, data.Length - 12);
+            }
+            else
+            {
+                Debug.LogError($"DiskPersister LoadChunk invalid file size: {data.Length} bytes in file {fn}");
+                return false;
+            }
+
             Chunk c = vol.GetChunk((x, y, z));
             if (!c)
                 return false;
             
-            c.LoadChanges(data);
+            c.LoadChanges(strippedData);
 
             return true;
         }
